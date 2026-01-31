@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#0b0a10" />
+  <title>regalito c:</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+  <!-- Fondo vivo -->
+  <div class="ambient">
+    <div class="ambient__layer ambient__layer--a"></div>
+    <div class="ambient__layer ambient__layer--b"></div>
+    <div class="ambient__layer ambient__layer--c"></div>
+    <div class="ambient__noise"></div>
+    <div class="ambient__vignette"></div>
+  </div>
+
+  <!-- Backdrop con la carátula (difuminado) -->
+  <div class="backdrop" aria-hidden="true">
+    <div class="backdrop__img backdrop__img--a"></div>
+    <div class="backdrop__img backdrop__img--b"></div>
+  </div>
+
+  <main class="wrap">
+    <section class="player" role="application" aria-label="Reproductor de música">
+      <header class="top">
+        <div class="brand">
+          <span class="brand__mark" aria-hidden="true"></span>
+          <div class="brand__text">
+            <div class="brand__title">MIDNIGHT PLAYER</div>
+            <div class="brand__sub">Gothic • Rock • Alive</div>
+          </div>
+        </div>
+
+        <button class="iconbtn" id="btnThemePulse" type="button" aria-label="Pulso visual">
+          <!-- Spark icon -->
+          <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+            <path d="M12 2l1.4 5.2L18.6 9 13.4 10.4 12 15.6 10.6 10.4 5.4 9l5.2-1.8L12 2zm8 10l.9 3.2 3.1.8-3.1.9L20 20l-.9-3.1-3.1-.9 3.1-.8L20 12zM4 13l.8 2.5 2.5.7-2.5.8L4 19.5 3.2 17 1 16.2l2.2-.7L4 13z"/>
+          </svg>
+        </button>
+      </header>
+
+      <div class="grid">
+        <!-- Columna izquierda: carátula + info -->
+        <div class="now">
+          <div class="cover" id="coverWrap" tabindex="0" aria-label="Carátula">
+            <img id="coverImg" alt="Carátula de la canción" />
+            <div class="cover__gloss" aria-hidden="true"></div>
+            <div class="cover__rim" aria-hidden="true"></div>
+          </div>
+
+          <div class="meta">
+            <div class="meta__title" id="trackTitle">—</div>
+            <div class="meta__artist" id="trackArtist">—</div>
+
+            <div class="chips" aria-label="Detalles">
+              <div class="chip" id="chipIndex">01/04</div>
+              <div class="chip" id="chipState">STOPPED</div>
+              <div class="chip" id="chipMode">STEREO</div>
+            </div>
+          </div>
+
+          <!-- Visualizador -->
+          <div class="viz" aria-hidden="true">
+            <div class="viz__bars" id="bars"></div>
+            <div class="viz__glow"></div>
+          </div>
+
+          <!-- Progreso -->
+          <div class="timeline">
+            <div class="time" id="timeNow">0:00</div>
+
+            <div class="seek" id="seek">
+              <div class="seek__track"></div>
+              <div class="seek__fill" id="seekFill"></div>
+              <div class="seek__knob" id="seekKnob" aria-hidden="true"></div>
+            </div>
+
+            <div class="time" id="timeTotal">0:00</div>
+          </div>
+
+          <!-- Controles -->
+          <div class="controls">
+            <button class="iconbtn" id="btnPrev" type="button" aria-label="Anterior">
+              <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+                <path d="M6 6h2v12H6V6zm3.5 6l12-7v14l-12-7z"/>
+              </svg>
+            </button>
+
+            <button class="playbtn" id="btnPlay" type="button" aria-label="Reproducir/Pausar">
+              <span class="playbtn__ring" aria-hidden="true"></span>
+              <span class="playbtn__ring playbtn__ring--2" aria-hidden="true"></span>
+              <svg viewBox="0 0 24 24" class="icon icon--xl" id="playIcon" aria-hidden="true">
+                <path d="M8 5v14l12-7L8 5z"/>
+              </svg>
+              <svg viewBox="0 0 24 24" class="icon icon--xl hidden" id="pauseIcon" aria-hidden="true">
+                <path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/>
+              </svg>
+            </button>
+
+            <button class="iconbtn" id="btnNext" type="button" aria-label="Siguiente">
+              <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+                <path d="M16 6h2v12h-2V6zM2.5 12l12 7V5l-12 7z"/>
+              </svg>
+            </button>
+
+            <div class="volume" aria-label="Volumen">
+              <svg viewBox="0 0 24 24" class="icon icon--sm" aria-hidden="true">
+                <path d="M3 10v4h4l5 4V6L7 10H3zm13.5 2a3.5 3.5 0 0 0-2-3.15v6.3A3.5 3.5 0 0 0 16.5 12zm0-8a9.5 9.5 0 0 1 0 16v-2a7.5 7.5 0 0 0 0-12V4z"/>
+              </svg>
+              <input id="vol" type="range" min="0" max="1" step="0.01" value="0.9" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Columna derecha: playlist -->
+        <aside class="list" aria-label="Lista de canciones">
+          <div class="list__head">
+            <div class="list__title">TRACKLIST</div>
+            <div class="list__hint">Click para reproducir</div>
+          </div>
+
+          <div class="tracks" id="trackList"></div>
+
+          <div class="tips">
+            <div class="tip">
+              <span class="tip__k">Espacio</span> play/pausa
+            </div>
+            <div class="tip">
+              <span class="tip__k">← →</span> anterior/siguiente
+            </div>
+            <div class="tip">
+              <span class="tip__k">Click</span> barra para buscar
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <footer class="foot">
+        <div class="foot__left">
+          <span class="dot"></span>
+          <span id="footStatus">Ready</span>
+        </div>
+        <div class="foot__right">
+          <span class="sig">crafted in shadow</span>
+        </div>
+      </footer>
+    </section>
+
+    <!-- Audio -->
+    <audio id="audio" preload="metadata" crossorigin="anonymous"></audio>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
