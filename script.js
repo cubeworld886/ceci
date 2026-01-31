@@ -1,23 +1,22 @@
 /* ===========================================
-   MIDNIGHT PLAYER — Professional script.js
-   - 4 tracks playlist
+   MIDNIGHT PLAYER — Mobile-optimized script.js
+   - Playlist: 4 tracks (fixed routes/names)
    - Cover + backdrop crossfade
-   - Palette sync (extract from cover; fallback safe)
-   - WebAudio visualizer (real) + elegant fallback
-   - Seek drag w/ pointer capture + keyboard controls
-   - Micro-interactions: UI "alive" states
+   - Palette sync from cover (idle-time + cached)
+   - WebAudio visualizer (only when playing, respects reduced-motion)
+   - Mobile behavior: touch-first seek, tilt disabled on coarse pointers
+   - Page visibility + AudioContext resume (iOS/Android friendly)
+   - Media Session controls (lockscreen / headset buttons)
    =========================================== */
 
 (() => {
   "use strict";
 
-  /* ---------- DOM helpers ---------- */
+  /* ---------- Helpers ---------- */
   const $ = (q, r = document) => r.querySelector(q);
   const $$ = (q, r = document) => Array.from(r.querySelectorAll(q));
-
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const clamp01 = (v) => clamp(v, 0, 1);
-
   const pad2 = (n) => String(n).padStart(2, "0");
 
   const fmtTime = (s) => {
@@ -27,57 +26,79 @@
     return `${m}:${String(sec).padStart(2, "0")}`;
   };
 
-  /* ---------- Required DOM (matches your HTML) ---------- */
-  const audio = $("#audio");                     // :contentReference[oaicite:3]{index=3}
-  const coverWrap = $("#coverWrap");             // :contentReference[oaicite:4]{index=4}
-  const coverImg = $("#coverImg");               // :contentReference[oaicite:5]{index=5}
+  const prefersReducedMotion = () =>
+    window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  const trackTitle = $("#trackTitle");           // :contentReference[oaicite:6]{index=6}
-  const trackArtist = $("#trackArtist");         // :contentReference[oaicite:7]{index=7}
-  const chipIndex = $("#chipIndex");             // :contentReference[oaicite:8]{index=8}
-  const chipState = $("#chipState");             // :contentReference[oaicite:9]{index=9}
-  const chipMode = $("#chipMode");               // :contentReference[oaicite:10]{index=10}
+  const isCoarsePointer = () =>
+    window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
 
-  const timeNow = $("#timeNow");                 // :contentReference[oaicite:11]{index=11}
-  const timeTotal = $("#timeTotal");             // :contentReference[oaicite:12]{index=12}
+  const canHover = () =>
+    window.matchMedia && window.matchMedia("(hover: hover)").matches;
 
-  const seek = $("#seek");                       // :contentReference[oaicite:13]{index=13}
-  const seekFill = $("#seekFill");               // :contentReference[oaicite:14]{index=14}
-  const seekKnob = $("#seekKnob");               // :contentReference[oaicite:15]{index=15}
+  const idle = (fn, timeout = 450) => {
+    // requestIdleCallback is great on mobile; fallback to a short timeout
+    if ("requestIdleCallback" in window) {
+      return window.requestIdleCallback(fn, { timeout });
+    }
+    return window.setTimeout(fn, Math.min(timeout, 300));
+  };
 
-  const btnPrev = $("#btnPrev");                 // :contentReference[oaicite:16]{index=16}
-  const btnPlay = $("#btnPlay");                 // :contentReference[oaicite:17]{index=17}
-  const btnNext = $("#btnNext");                 // :contentReference[oaicite:18]{index=18}
-  const playIcon = $("#playIcon");               // :contentReference[oaicite:19]{index=19}
-  const pauseIcon = $("#pauseIcon");             // :contentReference[oaicite:20]{index=20}
+  /* ---------- DOM (matches your HTML) ---------- */
+  const audio = $("#audio");
+  const coverWrap = $("#coverWrap");
+  const coverImg = $("#coverImg");
 
-  const vol = $("#vol");                         // :contentReference[oaicite:21]{index=21}
+  const trackTitle = $("#trackTitle");
+  const trackArtist = $("#trackArtist");
+  const chipIndex = $("#chipIndex");
+  const chipState = $("#chipState");
+  const chipMode = $("#chipMode");
 
-  const trackListEl = $("#trackList");           // :contentReference[oaicite:22]{index=22}
-  const footStatus = $("#footStatus");           // :contentReference[oaicite:23]{index=23}
+  const timeNow = $("#timeNow");
+  const timeTotal = $("#timeTotal");
 
-  const btnThemePulse = $("#btnThemePulse");     // :contentReference[oaicite:24]{index=24}
+  const seek = $("#seek");
+  const seekFill = $("#seekFill");
+  const seekKnob = $("#seekKnob");
 
-  const barsHost = $("#bars");                   // :contentReference[oaicite:25]{index=25}
-  const backdropA = $(".backdrop__img--a");      // :contentReference[oaicite:26]{index=26}
-  const backdropB = $(".backdrop__img--b");      // :contentReference[oaicite:27]{index=27}
+  const btnPrev = $("#btnPrev");
+  const btnPlay = $("#btnPlay");
+  const btnNext = $("#btnNext");
+  const playIcon = $("#playIcon");
+  const pauseIcon = $("#pauseIcon");
 
-  /* ---------- Tracks (EDIT THESE PATHS) ---------- */
-  // Pon aquí tus 4 canciones y 4 imágenes.
-  // Recomendación: usa rutas relativas desde index.html
+  const vol = $("#vol");
+  const trackListEl = $("#trackList");
+  const footStatus = $("#footStatus");
+
+  const btnThemePulse = $("#btnThemePulse");
+  const barsHost = $("#bars");
+
+  const backdropA = $(".backdrop__img--a");
+  const backdropB = $(".backdrop__img--b");
+
+  if (!audio) return;
+
+  // Help mobile pointer interactions (especially iOS)
+  if (seek) seek.style.touchAction = "none";
+
+  // Encourage light network usage
+  audio.preload = "metadata";
+
+  /* ---------- Fixed playlist (as you requested) ---------- */
   const TRACKS = [
-    { title: "Me Haces Feliz",   artist: "Serbia", src: "track1.mp3", cover: "cover1.jpeg" },
-    { title: "Campo de Fuerza",   artist: "Zoé", src: "track2.mp3", cover: "cover2.jpeg" },
+    { title: "Me Haces Feliz", artist: "Serbia", src: "track1.mp3", cover: "cover1.jpeg" },
+    { title: "Campo de Fuerza", artist: "Zoé", src: "track2.mp3", cover: "cover2.jpeg" },
     { title: "No Te Des Por Vencida", artist: "Serbia", src: "track3.mp3", cover: "cover3.jpeg" },
-    { title: "Francés Limón",  artist: "Enanitos Verdes", src: "track4.mp3", cover: "cover4.jpeg" },
+    { title: "Francés Limón", artist: "Enanitos Verdes", src: "track4.mp3", cover: "cover4.jpeg" },
   ];
 
-  /* ---------- Theme vars ---------- */
+  /* ---------- CSS vars ---------- */
   const root = document.documentElement;
   const cssVar = (k) => getComputedStyle(root).getPropertyValue(k).trim();
   const setVar = (k, v) => root.style.setProperty(k, v);
 
-  /* ---------- Color utils (small + fast) ---------- */
+  /* ---------- Color utils (fast + small) ---------- */
   const hexToRgb = (hex) => {
     const m = String(hex).trim().match(/^#?([0-9a-f]{6})$/i);
     if (!m) return null;
@@ -90,7 +111,9 @@
   };
 
   const rgbToHex = (r, g, b) =>
-    `#${[r, g, b].map((n) => clamp(Math.round(n), 0, 255).toString(16).padStart(2, "0")).join("")}`;
+    `#${[r, g, b]
+      .map((n) => clamp(Math.round(n), 0, 255).toString(16).padStart(2, "0"))
+      .join("")}`;
 
   const rgbToHsl = (r, g, b) => {
     r /= 255; g /= 255; b /= 255;
@@ -130,7 +153,7 @@
     return [r * 255, g * 255, b * 255];
   };
 
-  // “Goth polish”: deeper + slightly more saturated
+  // Dark + slightly saturated (goth polish)
   const gothify = (hex, satBoost = 0.18, lightShift = -0.12) => {
     const rgb = hexToRgb(hex);
     if (!rgb) return hex;
@@ -141,25 +164,33 @@
     return rgbToHex(rr, gg, bb);
   };
 
-  /* ---------- Palette extraction (fast quantize) ---------- */
+  /* ---------- Palette extraction (cached; idle-time) ---------- */
+  const paletteCache = new Map(); // coverUrl -> {a1,a2} | null
+
   const extractPalette = async (url) => {
-    // If cover hosted without CORS, canvas read may fail -> fallback gracefully
+    if (paletteCache.has(url)) return paletteCache.get(url);
+
+    // On low-motion preference, skip heavy work and keep current theme
+    if (prefersReducedMotion()) {
+      paletteCache.set(url, null);
+      return null;
+    }
+
     try {
       const img = new Image();
       img.crossOrigin = "anonymous";
       img.decoding = "async";
-
       await new Promise((res, rej) => {
         img.onload = res;
         img.onerror = rej;
         img.src = url;
       });
 
+      // Small canvas for mobile perf
+      const W = 80, H = 80;
       const c = document.createElement("canvas");
-      const ctx = c.getContext("2d", { willReadFrequently: true });
-
-      const W = 96, H = 96;
       c.width = W; c.height = H;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
       ctx.drawImage(img, 0, 0, W, H);
 
       const data = ctx.getImageData(0, 0, W, H).data;
@@ -170,10 +201,10 @@
       for (let i = 0; i < data.length; i += 4) {
         const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
         if (a < 200) continue;
-
         const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
         if (lum < minLum || lum > maxLum) continue;
 
+        // 16-level quantization per channel
         const qr = (r >> 4) << 4;
         const qg = (g >> 4) << 4;
         const qb = (b >> 4) << 4;
@@ -184,19 +215,23 @@
         else buckets.set(key, { r: qr, g: qg, b: qb, count: 1 });
       }
 
-      if (!buckets.size) return null;
+      if (!buckets.size) {
+        paletteCache.set(url, null);
+        return null;
+      }
 
       const sorted = Array.from(buckets.values()).sort((a, b) => b.count - a.count);
 
       const pick = [];
-      for (const c of sorted) {
-        if (!pick.length) pick.push(c);
+      for (const c0 of sorted) {
+        if (!pick.length) pick.push(c0);
         else {
           const [h1] = rgbToHsl(pick[0].r, pick[0].g, pick[0].b);
-          const [h2] = rgbToHsl(c.r, c.g, c.b);
+          const [h2] = rgbToHsl(c0.r, c0.g, c0.b);
           const dh = Math.min(Math.abs(h1 - h2), 1 - Math.abs(h1 - h2));
-          if (dh > 0.08) { pick.push(c); break; }
+          if (dh > 0.08) { pick.push(c0); break; }
         }
+        if (pick.length === 2) break;
       }
 
       if (pick.length === 1) {
@@ -211,8 +246,11 @@
       const a1 = gothify(rgbToHex(pick[0].r, pick[0].g, pick[0].b));
       const a2 = gothify(rgbToHex(pick[1].r, pick[1].g, pick[1].b), 0.12, -0.10);
 
-      return { a1, a2 };
+      const out = { a1, a2 };
+      paletteCache.set(url, out);
+      return out;
     } catch {
+      paletteCache.set(url, null);
       return null;
     }
   };
@@ -221,7 +259,7 @@
     if (accent) setVar("--accent", accent);
     if (accent2) setVar("--accent2", accent2);
 
-    // Optional: steer bg1 based on accent hue (subtle, keeps it "synced")
+    // keep background harmonized (subtle)
     const rgb = hexToRgb(accent || cssVar("--accent") || "#c51b55");
     if (rgb) {
       let [h, s] = rgbToHsl(rgb.r, rgb.g, rgb.b);
@@ -231,136 +269,61 @@
     }
   };
 
-  /* ---------- Backdrop crossfade (uses .is-on in your CSS) ---------- */
+  /* ---------- Backdrop crossfade ---------- */
   let backdropFlip = false;
   const setBackdrop = (url) => {
     const on = backdropFlip ? backdropA : backdropB;
     const off = backdropFlip ? backdropB : backdropA;
     backdropFlip = !backdropFlip;
 
-    on.style.backgroundImage = `url("${url}")`;
-    on.classList.add("is-on");     // :contentReference[oaicite:28]{index=28}
-    off.classList.remove("is-on");
-  };
-
-  /* ---------- Visualizer (WebAudio) ---------- */
-  let audioCtx = null, analyser = null, srcNode = null, freq = null;
-  let vizRAF = 0, fallbackRAF = 0;
-  let vizRunning = false;
-
-  const ensureAudioGraph = async () => {
-    if (audioCtx && analyser && srcNode) return;
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.82;
-
-    srcNode = audioCtx.createMediaElementSource(audio);
-    srcNode.connect(analyser);
-    analyser.connect(audioCtx.destination);
-
-    freq = new Uint8Array(analyser.frequencyBinCount);
-
-    // Build bars only once
-    if (!barsHost.childElementCount) {
-      const N = 28;
-      for (let i = 0; i < N; i++) {
-        const bar = document.createElement("div");
-        bar.className = "bar"; // styled in your CSS :contentReference[oaicite:29]{index=29}
-        bar.style.height = `${12 + (i % 5)}px`;
-        barsHost.appendChild(bar);
-      }
+    if (on) {
+      on.style.backgroundImage = `url("${url}")`;
+      on.classList.add("is-on");
     }
+    if (off) off.classList.remove("is-on");
   };
 
-  const stopViz = () => {
-    vizRunning = false;
-    cancelAnimationFrame(vizRAF);
-    cancelAnimationFrame(fallbackRAF);
-
-    // settle to a nice idle pose
-    const bars = $$(".bar", barsHost);
-    bars.forEach((b, i) => (b.style.height = `${12 + (i % 5)}px`));
-  };
-
-  const tickViz = () => {
-    if (!vizRunning || !analyser) return;
-    analyser.getByteFrequencyData(freq);
-
-    const bars = $$(".bar", barsHost);
-    const n = Math.min(bars.length, freq.length);
-
-    // Use mid band for "rock energy"
-    for (let i = 0; i < n; i++) {
-      const v = freq[i] / 255;             // 0..1
-      const shaped = Math.pow(v, 0.85);    // punchier
-      const h = 10 + shaped * 58;
-      bars[i].style.height = `${h.toFixed(1)}px`;
-    }
-
-    vizRAF = requestAnimationFrame(tickViz);
-  };
-
-  const tickFallback = () => {
-    if (!vizRunning) return;
-    const bars = $$(".bar", barsHost);
-    const t = performance.now() * 0.002;
-
-    bars.forEach((b, i) => {
-      const wave = (Math.sin(t + i * 0.45) * 0.5 + 0.5);
-      const jitter = (Math.sin(t * 1.7 + i) * 0.12);
-      const h = 12 + (wave + jitter) * 52;
-      b.style.height = `${h.toFixed(1)}px`;
-    });
-
-    fallbackRAF = requestAnimationFrame(tickFallback);
-  };
-
-  const startViz = () => {
-    if (vizRunning) return;
-    vizRunning = true;
-
-    if (analyser && freq) tickViz();
-    else tickFallback();
-  };
-
-  /* ---------- Player state ---------- */
+  /* ---------- UI state ---------- */
   const state = {
     i: 0,
     seeking: false,
     wasPlayingBeforeSeek: false,
-    progressRAF: 0,
-    lastProgressPaint: 0,
+    rafProgress: 0,
+    rafViz: 0,
+    rafFallback: 0,
+    vizRunning: false,
+    progressRunning: false,
+    lastPaint: 0,
+    seekRect: null,
   };
 
   const setChipState = (s) => (chipState.textContent = s);
   const setFoot = (s) => (footStatus.textContent = s);
 
   const setPlayIcons = (playing) => {
-    playIcon.classList.toggle("hidden", playing);   // hidden class exists :contentReference[oaicite:30]{index=30}
-    pauseIcon.classList.toggle("hidden", !playing);
+    if (playIcon) playIcon.classList.toggle("hidden", playing);
+    if (pauseIcon) pauseIcon.classList.toggle("hidden", !playing);
   };
 
   const setSeekUI = (pct) => {
     const p = clamp01(pct);
-    seekFill.style.width = `${(p * 100).toFixed(3)}%`;
-    seekKnob.style.left = `${(p * 100).toFixed(3)}%`;
+    if (seekFill) seekFill.style.width = `${(p * 100).toFixed(3)}%`;
+    if (seekKnob) seekKnob.style.left = `${(p * 100).toFixed(3)}%`;
   };
 
   const markActiveTrack = () => {
     $$(".track", trackListEl).forEach((row) => {
-      const isActive = Number(row.dataset.index) === state.i;
-      row.classList.toggle("is-active", isActive);
-
+      const active = Number(row.dataset.index) === state.i;
+      row.classList.toggle("is-active", active);
       const pill = $(".track__pill", row);
       if (!pill) return;
-      if (!isActive) pill.textContent = "PLAY";
-      else pill.textContent = audio.paused ? "READY" : "LIVE";
+      pill.textContent = !active ? "PLAY" : (audio.paused ? "READY" : "LIVE");
     });
   };
 
-  /* ---------- Playlist rendering ---------- */
+  /* ---------- Playlist ---------- */
   const renderPlaylist = () => {
+    if (!trackListEl) return;
     trackListEl.innerHTML = "";
     TRACKS.forEach((t, i) => {
       const row = document.createElement("div");
@@ -379,24 +342,24 @@
       $(".track__title", row).textContent = t.title;
       $(".track__artist", row).textContent = t.artist;
 
+      // Fast tap behavior
       row.addEventListener("click", () => {
         if (state.i !== i) loadTrack(i, { autoplay: true });
         else togglePlay();
-      });
+      }, { passive: true });
 
       trackListEl.appendChild(row);
     });
-
     markActiveTrack();
   };
 
-  /* ---------- Transitions (cover swap uses your CSS animation) ---------- */
+  /* ---------- Cover swap animation hook ---------- */
   const animateCoverSwap = () => {
-    coverWrap.classList.add("is-swap"); // triggers coverSwap keyframes :contentReference[oaicite:31]{index=31}
+    if (!coverWrap) return;
+    coverWrap.classList.add("is-swap");
     window.setTimeout(() => coverWrap.classList.remove("is-swap"), 560);
   };
 
-  /* ---------- Track loading ---------- */
   const preloadImage = (url) =>
     new Promise((res) => {
       const img = new Image();
@@ -409,62 +372,185 @@
   const waitMeta = () =>
     new Promise((res) => {
       if (Number.isFinite(audio.duration) && audio.duration > 0) return res();
-      const on = () => {
-        audio.removeEventListener("loadedmetadata", on);
-        res();
-      };
+      const on = () => res();
       audio.addEventListener("loadedmetadata", on, { once: true });
     });
 
-  const loadTrack = async (index, { autoplay = false } = {}) => {
-    state.i = (index + TRACKS.length) % TRACKS.length;
-    const t = TRACKS[state.i];
+  /* ---------- Media Session (mobile lockscreen/headset controls) ---------- */
+  const updateMediaSession = () => {
+    if (!("mediaSession" in navigator)) return;
+    try {
+      const t = TRACKS[state.i];
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: t.title,
+        artist: t.artist,
+        album: " ",
+        artwork: [
+          { src: t.cover, sizes: "512x512", type: "image/jpeg" },
+          { src: t.cover, sizes: "1024x1024", type: "image/jpeg" },
+        ],
+      });
 
-    chipIndex.textContent = `${pad2(state.i + 1)}/${pad2(TRACKS.length)}`;
-    setChipState("LOADING");
-    setFoot("Loading");
-    chipMode.textContent = "HI-FI";
-
-    trackTitle.textContent = t.title;
-    trackArtist.textContent = t.artist;
-
-    // preload cover for clean transitions
-    await preloadImage(t.cover);
-
-    animateCoverSwap();
-    coverImg.src = t.cover;
-    setBackdrop(t.cover);
-
-    // theme palette sync
-    const pal = await extractPalette(t.cover);
-    if (pal) applyTheme(pal.a1, pal.a2);
-
-    // audio
-    const resumeAfter = !audio.paused;
-    audio.src = t.src;
-    audio.load();
-
-    await waitMeta();
-
-    timeTotal.textContent = fmtTime(audio.duration);
-    timeNow.textContent = fmtTime(0);
-    setSeekUI(0);
-
-    setChipState("READY");
-    setFoot("Ready");
-    markActiveTrack();
-
-    if (autoplay || resumeAfter) await safePlay();
+      navigator.mediaSession.setActionHandler("play", () => safePlay());
+      navigator.mediaSession.setActionHandler("pause", () => pause());
+      navigator.mediaSession.setActionHandler("previoustrack", () => prev());
+      navigator.mediaSession.setActionHandler("nexttrack", () => next());
+      navigator.mediaSession.setActionHandler("seekto", (details) => {
+        if (details && typeof details.seekTime === "number" && Number.isFinite(audio.duration)) {
+          audio.currentTime = clamp(details.seekTime, 0, audio.duration);
+          paintProgress(true);
+        }
+      });
+    } catch {
+      // ignore
+    }
   };
 
-  /* ---------- Play/pause (safe with autoplay restrictions) ---------- */
+  /* ---------- AudioGraph + Visualizer ---------- */
+  let audioCtx = null, analyser = null, srcNode = null, freq = null;
+
+  const ensureBars = () => {
+    if (!barsHost || barsHost.childElementCount) return;
+    const N = 26; // slightly fewer for mobile perf
+    for (let i = 0; i < N; i++) {
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      bar.style.height = `${12 + (i % 5)}px`;
+      bar.style.opacity = String(0.72 + (i / N) * 0.28);
+      barsHost.appendChild(bar);
+    }
+  };
+
+  const ensureAudioGraph = async () => {
+    if (prefersReducedMotion()) return; // respect reduced motion: no analyser
+
+    if (audioCtx && analyser && srcNode) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.84;
+
+    srcNode = audioCtx.createMediaElementSource(audio);
+    srcNode.connect(analyser);
+    analyser.connect(audioCtx.destination);
+
+    freq = new Uint8Array(analyser.frequencyBinCount);
+    ensureBars();
+  };
+
+  const stopViz = () => {
+    state.vizRunning = false;
+    cancelAnimationFrame(state.rafViz);
+    cancelAnimationFrame(state.rafFallback);
+
+    // settle bars
+    if (barsHost) {
+      $$(".bar", barsHost).forEach((b, i) => (b.style.height = `${12 + (i % 5)}px`));
+    }
+  };
+
+  const tickViz = () => {
+    if (!state.vizRunning || !analyser || !freq) return;
+
+    analyser.getByteFrequencyData(freq);
+    const bars = $$(".bar", barsHost);
+    const n = Math.min(bars.length, freq.length);
+
+    for (let i = 0; i < n; i++) {
+      const v = freq[i] / 255;               // 0..1
+      const shaped = Math.pow(v, 0.88);      // punch without noise
+      const h = 10 + shaped * 56;
+      bars[i].style.height = `${h.toFixed(1)}px`;
+    }
+
+    state.rafViz = requestAnimationFrame(tickViz);
+  };
+
+  const tickFallback = () => {
+    if (!state.vizRunning) return;
+    const bars = $$(".bar", barsHost);
+    const t = performance.now() * 0.002;
+    for (let i = 0; i < bars.length; i++) {
+      const wave = (Math.sin(t + i * 0.45) * 0.5 + 0.5);
+      const jitter = (Math.sin(t * 1.6 + i) * 0.10);
+      const h = 12 + (wave + jitter) * 50;
+      bars[i].style.height = `${h.toFixed(1)}px`;
+    }
+    state.rafFallback = requestAnimationFrame(tickFallback);
+  };
+
+  const startViz = () => {
+    if (prefersReducedMotion()) return;
+    ensureBars();
+    if (state.vizRunning) return;
+    state.vizRunning = true;
+
+    if (analyser && freq) tickViz();
+    else tickFallback();
+  };
+
+  /* ---------- Progress painting (optimized) ---------- */
+  const paintProgress = (force = false) => {
+    if (state.seeking) return;
+
+    const now = performance.now();
+    if (!force && (now - state.lastPaint) < 50) return; // ~20fps is enough on mobile
+    state.lastPaint = now;
+
+    if (Number.isFinite(audio.duration) && audio.duration > 0) {
+      const pct = audio.currentTime / audio.duration;
+      setSeekUI(pct);
+      if (timeNow) timeNow.textContent = fmtTime(audio.currentTime);
+      if (timeTotal) timeTotal.textContent = fmtTime(audio.duration);
+    } else {
+      setSeekUI(0);
+      if (timeNow) timeNow.textContent = "0:00";
+    }
+  };
+
+  const stopProgressLoop = () => {
+    state.progressRunning = false;
+    cancelAnimationFrame(state.rafProgress);
+  };
+
+  const tickProgressLoop = () => {
+    if (!state.progressRunning) return;
+    paintProgress(false);
+    state.rafProgress = requestAnimationFrame(tickProgressLoop);
+  };
+
+  const startProgressLoop = () => {
+    if (state.progressRunning) return;
+    state.progressRunning = true;
+    state.lastPaint = 0;
+    tickProgressLoop();
+  };
+
+  /* ---------- Player controls ---------- */
+  const syncPlayState = () => {
+    const playing = !audio.paused && !audio.ended;
+    setPlayIcons(playing);
+    setChipState(playing ? "PLAYING" : "PAUSED");
+    setFoot(playing ? "Live" : "Ready");
+    markActiveTrack();
+
+    if (playing) {
+      startViz();
+      startProgressLoop();
+    } else {
+      stopViz();
+      // Keep progress loop only if user is seeking
+      if (!state.seeking) stopProgressLoop();
+    }
+  };
+
   const safePlay = async () => {
     try {
       await ensureAudioGraph();
       if (audioCtx && audioCtx.state === "suspended") await audioCtx.resume();
       await audio.play();
     } catch {
-      // Browser needs user gesture
+      // autoplay policies: require user gesture
     } finally {
       syncPlayState();
     }
@@ -483,43 +569,14 @@
   const prev = () => loadTrack(state.i - 1, { autoplay: !audio.paused });
   const next = () => loadTrack(state.i + 1, { autoplay: !audio.paused });
 
-  const syncPlayState = () => {
-    const playing = !audio.paused && !audio.ended;
-    setPlayIcons(playing);
-    setChipState(playing ? "PLAYING" : "PAUSED");
-    setFoot(playing ? "Live" : "Ready");
-    markActiveTrack();
-
-    if (playing) startViz();
-    else stopViz();
+  /* ---------- Seek (touch-first, pointer capture) ---------- */
+  const updateSeekRect = () => {
+    if (!seek) return;
+    state.seekRect = seek.getBoundingClientRect();
   };
 
-  /* ---------- Progress (smooth + throttled paint) ---------- */
-  const stopProgressRAF = () => cancelAnimationFrame(state.progressRAF);
-
-  const tickProgress = () => {
-    if (!state.seeking) {
-      const now = performance.now();
-      // paint at ~30fps for smoothness without waste
-      if (now - state.lastProgressPaint > 33) {
-        state.lastProgressPaint = now;
-
-        if (Number.isFinite(audio.duration) && audio.duration > 0) {
-          const pct = audio.currentTime / audio.duration;
-          setSeekUI(pct);
-          timeNow.textContent = fmtTime(audio.currentTime);
-        } else {
-          setSeekUI(0);
-          timeNow.textContent = "0:00";
-        }
-      }
-    }
-    state.progressRAF = requestAnimationFrame(tickProgress);
-  };
-
-  /* ---------- Seek (pointer capture for premium feel) ---------- */
   const clientXToPct = (x) => {
-    const r = seek.getBoundingClientRect();
+    const r = state.seekRect || seek.getBoundingClientRect();
     if (r.width <= 0) return 0;
     return clamp01((x - r.left) / r.width);
   };
@@ -528,25 +585,36 @@
     if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
     audio.currentTime = pct * audio.duration;
     setSeekUI(pct);
-    timeNow.textContent = fmtTime(audio.currentTime);
+    if (timeNow) timeNow.textContent = fmtTime(audio.currentTime);
   };
 
   const bindSeek = () => {
+    if (!seek) return;
+    updateSeekRect();
+
     const onDown = (e) => {
       state.seeking = true;
       state.wasPlayingBeforeSeek = !audio.paused;
 
-      // pause for stable UX while dragging
+      // Pause during drag for stable UX on mobile
       audio.pause();
 
-      seek.setPointerCapture?.(e.pointerId);
-      seekToPct(clientXToPct(e.clientX));
+      updateSeekRect();
+      const pct = clientXToPct(e.clientX);
+      seekToPct(pct);
+
+      // Capture pointer if possible
+      if (seek.setPointerCapture) {
+        try { seek.setPointerCapture(e.pointerId); } catch {}
+      }
+
       syncPlayState();
     };
 
     const onMove = (e) => {
       if (!state.seeking) return;
-      seekToPct(clientXToPct(e.clientX));
+      const pct = clientXToPct(e.clientX);
+      seekToPct(pct);
     };
 
     const onUp = async () => {
@@ -561,17 +629,100 @@
     seek.addEventListener("pointermove", onMove);
     seek.addEventListener("pointerup", onUp);
     seek.addEventListener("pointercancel", onUp);
+
+    // Recalc rect on resize/orientation change
+    window.addEventListener("resize", () => updateSeekRect(), { passive: true });
+    window.addEventListener("orientationchange", () => {
+      window.setTimeout(updateSeekRect, 120);
+    }, { passive: true });
   };
 
   /* ---------- Volume ---------- */
   const bindVolume = () => {
+    if (!vol) return;
     audio.volume = Number(vol.value);
     vol.addEventListener("input", () => {
       audio.volume = Number(vol.value);
-    });
+    }, { passive: true });
   };
 
-  /* ---------- Keyboard ---------- */
+  /* ---------- Cover tilt (disabled on mobile/coarse pointers) ---------- */
+  const bindCoverTilt = () => {
+    if (!coverWrap) return;
+    if (isCoarsePointer() || !canHover()) return;
+
+    const max = 7;
+    const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+
+    const onMove = (e) => {
+      const r = coverWrap.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+
+      const dx = clamp((e.clientX - cx) / (r.width / 2), -1, 1);
+      const dy = clamp((e.clientY - cy) / (r.height / 2), -1, 1);
+
+      const rx = -max * easeOutCubic(Math.abs(dy)) * Math.sign(dy);
+      const ry =  max * easeOutCubic(Math.abs(dx)) * Math.sign(dx);
+
+      coverWrap.style.transform = `perspective(900px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg)`;
+    };
+
+    const reset = () => {
+      coverWrap.style.transform = "perspective(900px) rotateX(0deg) rotateY(0deg)";
+    };
+
+    coverWrap.addEventListener("pointermove", onMove);
+    coverWrap.addEventListener("pointerleave", reset);
+    coverWrap.addEventListener("blur", reset);
+  };
+
+  /* ---------- Theme pulse ---------- */
+  const bindPulse = () => {
+    if (!btnThemePulse) return;
+
+    btnThemePulse.addEventListener("click", () => {
+      // lightweight animation (no layout trash)
+      root.animate(
+        [
+          { filter: "brightness(1) saturate(1)" },
+          { filter: "brightness(1.08) saturate(1.25)" },
+          { filter: "brightness(1) saturate(1)" },
+        ],
+        { duration: 420, easing: "cubic-bezier(.2,.9,.12,1)" }
+      );
+
+      const a = cssVar("--accent") || "#c51b55";
+      const b = cssVar("--accent2") || "#7a3cff";
+      applyTheme(gothify(a, 0.06, -0.02), gothify(b, 0.04, -0.02));
+
+      setFoot("Pulse");
+      window.setTimeout(() => setFoot((!audio.paused && !audio.ended) ? "Live" : "Ready"), 520);
+    }, { passive: true });
+  };
+
+  /* ---------- Buttons + gesture priming ---------- */
+  const bindControls = () => {
+    if (btnPlay) btnPlay.addEventListener("click", () => togglePlay(), { passive: true });
+    if (btnPrev) btnPrev.addEventListener("click", () => prev(), { passive: true });
+    if (btnNext) btnNext.addEventListener("click", () => next(), { passive: true });
+
+    // Prime AudioContext on first user gesture (iOS/Android policies)
+    const prime = async () => {
+      try {
+        await ensureAudioGraph();
+        if (audioCtx && audioCtx.state === "suspended") await audioCtx.resume();
+      } catch {}
+      window.removeEventListener("pointerdown", prime, true);
+      window.removeEventListener("touchstart", prime, true);
+      window.removeEventListener("keydown", prime, true);
+    };
+    window.addEventListener("pointerdown", prime, true);
+    window.addEventListener("touchstart", prime, true);
+    window.addEventListener("keydown", prime, true);
+  };
+
+  /* ---------- Keyboard (kept, but mobile-safe) ---------- */
   const bindKeyboard = () => {
     window.addEventListener("keydown", (e) => {
       const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : "";
@@ -590,89 +741,79 @@
     });
   };
 
-  /* ---------- Cover tilt (already styled for transform) ---------- */
-  const bindCoverTilt = () => {
-    const max = 7; // degrees
-    const ease = (t) => 1 - Math.pow(1 - t, 3);
+  /* ---------- Load track ---------- */
+  const loadTrack = async (index, { autoplay = false } = {}) => {
+    state.i = (index + TRACKS.length) % TRACKS.length;
+    const t = TRACKS[state.i];
 
-    const onMove = (e) => {
-      const r = coverWrap.getBoundingClientRect();
-      const cx = r.left + r.width / 2;
-      const cy = r.top + r.height / 2;
+    if (chipIndex) chipIndex.textContent = `${pad2(state.i + 1)}/${pad2(TRACKS.length)}`;
+    setChipState("LOADING");
+    setFoot("Loading");
+    if (chipMode) chipMode.textContent = "HI-FI";
 
-      const dx = clamp((e.clientX - cx) / (r.width / 2), -1, 1);
-      const dy = clamp((e.clientY - cy) / (r.height / 2), -1, 1);
+    if (trackTitle) trackTitle.textContent = t.title;
+    if (trackArtist) trackArtist.textContent = t.artist;
 
-      const rx = -max * ease(Math.abs(dy)) * Math.sign(dy);
-      const ry =  max * ease(Math.abs(dx)) * Math.sign(dx);
+    // Smooth cover swap: preload then animate
+    await preloadImage(t.cover);
 
-      coverWrap.style.transform = `perspective(900px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg)`;
-    };
+    animateCoverSwap();
+    if (coverImg) coverImg.src = t.cover;
+    setBackdrop(t.cover);
 
-    const reset = () => {
-      coverWrap.style.transform = "perspective(900px) rotateX(0deg) rotateY(0deg)";
-    };
-
-    coverWrap.addEventListener("pointermove", onMove);
-    coverWrap.addEventListener("pointerleave", reset);
-    coverWrap.addEventListener("blur", reset);
-  };
-
-  /* ---------- Theme pulse (micro “alive” burst) ---------- */
-  const bindPulse = () => {
-    btnThemePulse.addEventListener("click", () => {
-      root.animate(
-        [
-          { filter: "brightness(1) saturate(1)" },
-          { filter: "brightness(1.08) saturate(1.25)" },
-          { filter: "brightness(1) saturate(1)" },
-        ],
-        { duration: 420, easing: "cubic-bezier(.2,.9,.12,1)" }
-      );
-
-      // tiny accent nudge
-      const a = cssVar("--accent") || "#c51b55";
-      const b = cssVar("--accent2") || "#7a3cff";
-      applyTheme(gothify(a, 0.06, -0.02), gothify(b, 0.04, -0.02));
-
-      setFoot("Pulse");
-      window.setTimeout(() => setFoot((!audio.paused && !audio.ended) ? "Live" : "Ready"), 520);
+    // Apply palette in idle time so it doesn't hitch scrolling on mobile
+    idle(async () => {
+      const pal = await extractPalette(t.cover);
+      if (pal) applyTheme(pal.a1, pal.a2);
     });
-  };
 
-  /* ---------- Button bindings ---------- */
-  const bindControls = () => {
-    btnPlay.addEventListener("click", togglePlay);
-    btnPrev.addEventListener("click", prev);
-    btnNext.addEventListener("click", next);
+    // Audio source
+    const resumeAfter = !audio.paused;
+    audio.src = t.src;
+    audio.load();
 
-    // ensure audio graph created on first user gesture (autoplay policies)
-    const prime = async () => {
-      try {
-        await ensureAudioGraph();
-        if (audioCtx && audioCtx.state === "suspended") await audioCtx.resume();
-      } catch {}
-      window.removeEventListener("pointerdown", prime, true);
-      window.removeEventListener("keydown", prime, true);
-    };
-    window.addEventListener("pointerdown", prime, true);
-    window.addEventListener("keydown", prime, true);
+    await waitMeta();
+
+    if (timeTotal) timeTotal.textContent = fmtTime(audio.duration);
+    if (timeNow) timeNow.textContent = fmtTime(0);
+    setSeekUI(0);
+
+    setChipState("READY");
+    setFoot("Ready");
+    markActiveTrack();
+
+    updateMediaSession();
+
+    // Preload adjacent covers (lightweight)
+    idle(() => {
+      const nextI = (state.i + 1) % TRACKS.length;
+      const prevI = (state.i - 1 + TRACKS.length) % TRACKS.length;
+      preloadImage(TRACKS[nextI].cover);
+      preloadImage(TRACKS[prevI].cover);
+    }, 700);
+
+    if (autoplay || resumeAfter) await safePlay();
   };
 
   /* ---------- Audio events ---------- */
   const bindAudioEvents = () => {
     audio.addEventListener("play", syncPlayState);
     audio.addEventListener("pause", syncPlayState);
+
+    audio.addEventListener("timeupdate", () => paintProgress(false), { passive: true });
+
+    audio.addEventListener("loadedmetadata", () => {
+      if (timeTotal) timeTotal.textContent = fmtTime(audio.duration);
+      paintProgress(true);
+    });
+
     audio.addEventListener("ended", () => {
       setChipState("ENDED");
       setFoot("Ended");
       markActiveTrack();
-      // tasteful auto-next
-      window.setTimeout(() => loadTrack(state.i + 1, { autoplay: true }), 380);
-    });
-
-    audio.addEventListener("loadedmetadata", () => {
-      timeTotal.textContent = fmtTime(audio.duration);
+      stopViz();
+      // Auto-next with tasteful delay
+      window.setTimeout(() => loadTrack(state.i + 1, { autoplay: true }), 360);
     });
 
     audio.addEventListener("error", () => {
@@ -680,11 +821,23 @@
       setFoot("Audio error");
       syncPlayState();
     });
+
+    // If user leaves the tab/app, pause (mobile battery + UX)
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        if (!audio.paused) audio.pause();
+        stopViz();
+        stopProgressLoop();
+      } else {
+        // don't auto-play on return; just refresh UI
+        paintProgress(true);
+        syncPlayState();
+      }
+    });
   };
 
   /* ---------- Init ---------- */
   const init = async () => {
-    // basic
     renderPlaylist();
     bindControls();
     bindSeek();
@@ -694,36 +847,21 @@
     bindPulse();
     bindAudioEvents();
 
-    // build bars for idle presence even before play
-    if (!barsHost.childElementCount) {
-      const N = 28;
-      for (let i = 0; i < N; i++) {
-        const bar = document.createElement("div");
-        bar.className = "bar";
-        bar.style.height = `${12 + (i % 5)}px`;
-        barsHost.appendChild(bar);
-      }
-    }
+    ensureBars();
 
-    // idle fallback motion (subtle, not noisy)
-    vizRunning = true;
-    tickFallback();
-    window.setTimeout(() => { vizRunning = false; stopViz(); }, 900);
-
-    // initial track
-    chipIndex.textContent = `01/${pad2(TRACKS.length)}`;
+    // Start in a calm state
+    if (chipIndex) chipIndex.textContent = `01/${pad2(TRACKS.length)}`;
     setChipState("STOPPED");
-    chipMode.textContent = "HI-FI";
-    timeNow.textContent = "0:00";
-    timeTotal.textContent = "0:00";
+    if (chipMode) chipMode.textContent = "HI-FI";
+    if (timeNow) timeNow.textContent = "0:00";
+    if (timeTotal) timeTotal.textContent = "0:00";
     setSeekUI(0);
 
-    await loadTrack(0, { autoplay: false });
+    // Initial theme fallback
+    applyTheme(cssVar("--accent") || "#c51b55", cssVar("--accent2") || "#7a3cff");
 
-    // start continuous progress paint
-    stopProgressRAF();
-    state.lastProgressPaint = 0;
-    tickProgress();
+    await loadTrack(0, { autoplay: false });
+    paintProgress(true);
   };
 
   init();
