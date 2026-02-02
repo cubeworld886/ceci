@@ -1,6 +1,6 @@
 /* ===========================================
    MIDNIGHT PLAYER — Mobile-optimized script.js
-   - Playlist: 4 tracks (fixed routes/names)
+   - Playlist: 5 tracks (fixed routes/names)
    - Cover + backdrop crossfade
    - Palette sync from cover (idle-time + cached)
    - WebAudio visualizer (only when playing, respects reduced-motion)
@@ -91,6 +91,7 @@
     { title: "Campo de Fuerza", artist: "Zoé", src: "track2.mp3", cover: "cover2.jpeg" },
     { title: "No Te Des Por Vencida", artist: "Serbia", src: "track3.mp3", cover: "cover3.jpeg" },
     { title: "Francés Limón", artist: "Enanitos Verdes", src: "track4.mp3", cover: "cover4.jpeg" },
+    { title: "Eres Tu", artist: "Serbia", src: "track5.mp3", cover: "cover5.jpeg" },
   ];
 
   /* ---------- CSS vars ---------- */
